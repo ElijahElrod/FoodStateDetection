@@ -88,26 +88,71 @@ def create_image_label_df(df):
         rotate_1 = cv2.rotate(img_data, cv2.ROTATE_90_CLOCKWISE)
         rotate_2 = cv2.rotate(img_data, cv2.ROTATE_180)
         rotate_3 = cv2.rotate(img_data, cv2.ROTATE_90_COUNTERCLOCKWISE)
-        plt.imshow(img_data)
-        plt.imshow(flip_1)
+ 
         img_label_list.append([img_data, row['state']])
         img_label_list.append([flip_1, row['state']])
         img_label_list.append([rotate_1, row['state']])
         img_label_list.append([rotate_2, row['state']])
-        img_label_list.append([rotate_3, row['state']])
-   
-   
-        
+        img_label_list.append([rotate_3, row['state']])   
 
     return img_label_list
 
 
+def create_imgs_labels_from_dir():
+    train_files = filelist('./data/train', '.jpg')
+    test_files = filelist('./data/test', '.jpg')
+    train_img_labels = []
+    for ind, i in enumerate(train_files):
+        path = i.split("\\")
+        label = path[1]
+        img = cv2.imread(i)
+        img_copy = img.copy()
+        ROI = cv2.resize(img_copy, (128, 128), 1)
+        grayscaled_ROI = cv2.cvtColor(ROI, cv2.COLOR_BGR2GRAY)
+        new_path = f'./data/TrainImages/img_{ind}.png'
+        cv2.imwrite(new_path, grayscaled_ROI)
+        img_data = np.asarray(grayscaled_ROI).astype('float')
+
+        flip_1 = np.fliplr(img_data)
+        rotate_1 = cv2.rotate(img_data, cv2.ROTATE_90_CLOCKWISE)
+        rotate_2 = cv2.rotate(img_data, cv2.ROTATE_180)
+        rotate_3 = cv2.rotate(img_data, cv2.ROTATE_90_COUNTERCLOCKWISE)
+ 
+        train_img_labels.append([img_data, label])
+        train_img_labels.append([flip_1, label])
+        train_img_labels.append([rotate_1, label])
+        train_img_labels.append([rotate_2, label])
+        train_img_labels.append([rotate_3,label])  
+
+    test_img_labels = []
+    for ind, i in enumerate(test_files):
+        path = i.split("\\")
+        label = path[1]
+        img = cv2.imread(i)
+        img_copy = img.copy()
+        ROI = cv2.resize(img_copy, (128, 128), 1)
+        grayscaled_ROI = cv2.cvtColor(ROI, cv2.COLOR_BGR2GRAY)
+        new_path = f'./data/TrainImages/img_{ind}.png'
+        cv2.imwrite(new_path, grayscaled_ROI)
+        img_data = np.asarray(grayscaled_ROI).astype('float')
+
+        flip_1 = np.fliplr(img_data)
+        rotate_1 = cv2.rotate(img_data, cv2.ROTATE_90_CLOCKWISE)
+        rotate_2 = cv2.rotate(img_data, cv2.ROTATE_180)
+        rotate_3 = cv2.rotate(img_data, cv2.ROTATE_90_COUNTERCLOCKWISE)
+ 
+        test_img_labels.append([img_data, label])
+        test_img_labels.append([flip_1, label])
+        test_img_labels.append([rotate_1, label])
+        test_img_labels.append([rotate_2, label])
+        test_img_labels.append([rotate_3,label])
+
+    return train_img_labels, test_img_labels
+
 
 
 def make_conv_model(input_shape):
-    model = Sequential(
-      
-    )
+    model = Sequential()
 
     model.add(Conv2D(128, kernel_size=3,
                      activation='relu', input_shape=input_shape))
@@ -140,35 +185,48 @@ def main():
 
     anno_path = Path('./data/Annotations')
     images_path = Path('./data/Images')
-    train_path = Path('./data/TrainImages')
+    train_path = Path('./data/train')
+    test_path = Path('./data/test')
 
-    class_dict = {'whole': 0, 'cut': 1, 'sliced': 2, 'chopped': 3,
-                  'minced': 4, 'peeled': 5, 'other': 6, 'none': 7}
+    class_dict = {'creamy_paste': 0,'diced': 1,'floured': 2,'grated': 3,'juiced': 4, 'jullienne': 5,
+                'mixed': 6,'other': 7,'peeled': 8,'sliced': 9,'whole': 10}
 
-    data_df = generate_data_df(anno_path, images_path)
-    imgs_labels = create_image_label_df(data_df)
-    print(len(imgs_labels))
+    train_set, test_set = create_imgs_labels_from_dir()
+    # data_df = generate_data_df(anno_path, images_path)
+    # imgs_labels = create_image_label_df(data_df)
+ 
 
-    random.shuffle(imgs_labels)
+    random.shuffle(train_set)
+    random.shuffle(test_set)
+    
 
-    X = []
-    y = []
-    for features, labels in imgs_labels:
-        X.append(features)
-        y.append(labels)
+    X_train = []
+    y_train = []
+    for features, labels in train_set:
+        X_train.append(features)
+        y_train.append(labels)
+
+    X_test = []
+    y_test = []
+    for features, labels in test_set:
+        X_test.append(features)
+        y_test.append(labels)
   
  
-    X = np.array(X).reshape(-1, IMG_SIZE, IMG_SIZE, 1)
-    X /= 255.0
-    y_encoded = pd.get_dummies(y)   
+    X_train = np.array(X_train).reshape(-1, IMG_SIZE, IMG_SIZE, 1)
+    X_train /= 255.0
+    X_test = np.array(X_test).reshape(-1, IMG_SIZE, IMG_SIZE, 1)
+    X_test /= 255.0
 
+    y_train_encoded = pd.get_dummies(y_train)   
+    y_test_encoded = pd.get_dummies(y_test)
 
     tensorboard = TensorBoard(log_dir="logs/{}".format("Object State CNN"))
 
     model = make_conv_model(input_shape=input_shape)
-    model.fit(X, y_encoded, epochs=EPOCHS, batch_size=BATCH_SIZE, validation_split=0.3, callbacks=[tensorboard])
+    model.fit(X_train, y_train_encoded, epochs=EPOCHS, batch_size=BATCH_SIZE, validation_split=0.3, callbacks=[tensorboard])
 
-    model.save('trained_model')
+    # model.save('trained_model')
   
 
 if __name__ == "__main__":
