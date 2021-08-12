@@ -1,14 +1,15 @@
 
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, confusion_matrix
 from sklearn.model_selection import train_test_split
-from keras.layers import Dense, Conv2D, Flatten, MaxPool2D, Dropout
+from keras.layers import Dense, Conv2D, Flatten, MaxPool2D, Dropout, BatchNormalization
 from keras.models import Sequential
 from keras.utils import to_categorical, plot_model
 from keras import Input
 import tensorflow as tf
-from tensorflow.keras.callbacks import TensorBoard
+from tensorflow import keras
+from tensorflow.keras.callbacks import TensorBoard, ModelCheckpoint
 from xml.etree import ElementTree as ET
 from pathlib import Path
 import matplotlib.pyplot as plt
@@ -99,9 +100,10 @@ def create_image_label_df(df):
 
 
 def create_imgs_labels_from_dir():
-    train_files = filelist('./data/train', '.jpg')
-    test_files = filelist('./data/test', '.jpg')
+    train_files = filelist('./data/dataset1/train', '.jpg')
+    test_files = filelist('./data/dataset1/valid', '.jpg')
     train_img_labels = []
+    print("Processing Training Files")
     for ind, i in enumerate(train_files):
         path = i.split("\\")
         label = path[1]
@@ -109,8 +111,6 @@ def create_imgs_labels_from_dir():
         img_copy = img.copy()
         ROI = cv2.resize(img_copy, (128, 128), 1)
         grayscaled_ROI = cv2.cvtColor(ROI, cv2.COLOR_BGR2GRAY)
-        new_path = f'./data/TrainImages/img_{ind}.png'
-        cv2.imwrite(new_path, grayscaled_ROI)
         img_data = np.asarray(grayscaled_ROI).astype('float')
 
         flip_1 = np.fliplr(img_data)
@@ -125,6 +125,7 @@ def create_imgs_labels_from_dir():
         train_img_labels.append([rotate_3,label])  
 
     test_img_labels = []
+    print("Processing Test Files")
     for ind, i in enumerate(test_files):
         path = i.split("\\")
         label = path[1]
@@ -132,8 +133,6 @@ def create_imgs_labels_from_dir():
         img_copy = img.copy()
         ROI = cv2.resize(img_copy, (128, 128), 1)
         grayscaled_ROI = cv2.cvtColor(ROI, cv2.COLOR_BGR2GRAY)
-        new_path = f'./data/TrainImages/img_{ind}.png'
-        cv2.imwrite(new_path, grayscaled_ROI)
         img_data = np.asarray(grayscaled_ROI).astype('float')
 
         flip_1 = np.fliplr(img_data)
@@ -142,45 +141,67 @@ def create_imgs_labels_from_dir():
         rotate_3 = cv2.rotate(img_data, cv2.ROTATE_90_COUNTERCLOCKWISE)
  
         test_img_labels.append([img_data, label])
-        test_img_labels.append([flip_1, label])
-        test_img_labels.append([rotate_1, label])
-        test_img_labels.append([rotate_2, label])
-        test_img_labels.append([rotate_3,label])
+        # test_img_labels.append([flip_1, label])
+        # test_img_labels.append([rotate_1, label])
+        # test_img_labels.append([rotate_2, label])
+        # test_img_labels.append([rotate_3,label])
 
     return train_img_labels, test_img_labels
 
 
 
-def make_conv_model(input_shape):
+def make_conv_model(input_shape, opt):
     model = Sequential()
 
-    model.add(Conv2D(128, kernel_size=3,
-                     activation='relu', input_shape=input_shape))
+    model.add(Conv2D(16, kernel_size=(3,3),
+                     activation='relu', padding='same', input_shape=input_shape))
     model.add(MaxPool2D(pool_size=(2, 2)))
-    model.add(Dropout(.5))
 
-    model.add(Conv2D(64, kernel_size=3, activation='relu'))
+    model.add(Conv2D(32, kernel_size=(3,3), activation='relu'))
+    model.add(Conv2D(32, kernel_size=(3,3), activation='relu'))
     model.add(MaxPool2D(pool_size=(2, 2)))
-    model.add(Dropout(.5))
+  
+    model.add(Conv2D(64, kernel_size=(3,3), activation='relu'))
+    model.add(Conv2D(64, kernel_size=(3,3), activation='relu'))
+    model.add(MaxPool2D(pool_size=(2, 2)))
 
-    model.add(Conv2D(32, kernel_size=3, activation='relu'))
+    model.add(Dropout(.33))
+    model.add(Conv2D(128, kernel_size=(3,3), activation='relu'))
+    model.add(Conv2D(128, kernel_size=(3,3), activation='relu'))
     model.add(MaxPool2D(pool_size=(2, 2)))
-    model.add(Dropout(.5))
+    model.add(Dropout(.33))
+  
 
     model.add(Flatten())
-    model.add(Dense(64))
-    model.add(Dense(8, activation='softmax'))
-    model.compile(optimizer="adam", loss="categorical_crossentropy",
+    model.add(Dense(128))
+    model.add(Dropout(.33))
+    model.add(Dense(11, activation='softmax'))
+    model.compile(optimizer=opt, loss="categorical_crossentropy",
                   metrics=['accuracy'])
     model.summary()
     return model
 
 
 def main():
-    IMG_SIZE = 128
 
-    BATCH_SIZE = 32
-    EPOCHS = 20
+    IMG_SIZE = 128
+    BATCH_SIZE = 64
+    EPOCHS = 50
+    MDL_CHK_PT_PATH = './checkpoint'
+    sgd_model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
+        filepath=f'{MDL_CHK_PT_PATH}/sgd',
+        monitor='val_accuracy',
+        mode='max',
+        save_best_only=True,
+        save_freq='epoch')
+
+    adam_model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
+        filepath=f'{MDL_CHK_PT_PATH}/adam',
+        monitor='val_accuracy',
+        mode='max',
+        save_best_only=True,
+        save_freq='epoch')
+
     input_shape = (IMG_SIZE, IMG_SIZE, 1)
 
     anno_path = Path('./data/Annotations')
@@ -188,13 +209,23 @@ def main():
     train_path = Path('./data/train')
     test_path = Path('./data/test')
 
-    class_dict = {'creamy_paste': 0,'diced': 1,'floured': 2,'grated': 3,'juiced': 4, 'jullienne': 5,
-                'mixed': 6,'other': 7,'peeled': 8,'sliced': 9,'whole': 10}
-
     train_set, test_set = create_imgs_labels_from_dir()
     # data_df = generate_data_df(anno_path, images_path)
     # imgs_labels = create_image_label_df(data_df)
  
+    '''
+    Training set distribution in case needed to up or downsample a category
+    '''
+    # labelDist = {}
+    # for x,y  in train_set:
+    #     if labelDist.get(y) is None:
+    #         labelDist[y] = 1
+    #     else:
+    #         labelDist[y] = labelDist.get(y)+1
+
+    # for i in labelDist:
+    #     labelDist[i] = labelDist[i]/len(train_set)
+    # print(labelDist)
 
     random.shuffle(train_set)
     random.shuffle(test_set)
@@ -218,15 +249,22 @@ def main():
     X_test = np.array(X_test).reshape(-1, IMG_SIZE, IMG_SIZE, 1)
     X_test /= 255.0
 
-    y_train_encoded = pd.get_dummies(y_train)   
-    y_test_encoded = pd.get_dummies(y_test)
+    y_train = pd.get_dummies(y_train)   
+    y_test = pd.get_dummies(y_test)
 
-    tensorboard = TensorBoard(log_dir="logs/{}".format("Object State CNN"))
+   
 
-    model = make_conv_model(input_shape=input_shape)
-    model.fit(X_train, y_train_encoded, epochs=EPOCHS, batch_size=BATCH_SIZE, validation_split=0.3, callbacks=[tensorboard])
+    adam_tensorboard_callback = TensorBoard(log_dir="logs/adam/{}".format("ADAM CNN"))
+    sgd_tensorboard_callback = TensorBoard(log_dir="logs/sgd/{}".format("SGD CNN"))
 
-    # model.save('trained_model')
+    adam_model = make_conv_model(input_shape=input_shape, opt="adam")
+    adam_model.fit(X_train, y_train, validation_split=0.2, epochs=EPOCHS, batch_size=BATCH_SIZE, callbacks=[adam_tensorboard_callback, adam_model_checkpoint_callback])
+
+    sgd_model = make_conv_model(input_shape=input_shape, opt="sgd")
+    sgd_model.fit(X_train, y_train,  validation_split=0.2, epochs=EPOCHS, batch_size=BATCH_SIZE, callbacks=[sgd_tensorboard_callback, sgd_model_checkpoint_callback])
+
+    
+
   
 
 if __name__ == "__main__":
